@@ -5,6 +5,10 @@ const router = express.Router();
 // Prediction endpoint
 router.post('/predict', async (req, res) => {
     try {
+        // Log incoming request for debugging
+        console.log('Prediction request received');
+        console.log('Content-Type:', req.get('Content-Type'));
+        console.log('Request body:', req.body);
         // Extract sensor data from request body
         const {
             temperature,
