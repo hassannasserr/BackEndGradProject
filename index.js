@@ -9,6 +9,7 @@ const PORT = process.env.PORT || 3000;
 
 const authRoutes = require('./routes/auth'); 
 const predictionRoutes = require('./routes/prediction');
+const MachinesRoutes = require('./routes/Machines');
 // Mongoose Connection
 mongoose.connect(dbUri)
   .then(() => console.log('MongoDB Connected Successfully!'))
@@ -26,6 +27,7 @@ app.use(express.urlencoded({ extended: true }));
 // Route Mounting
 app.use('/api', authRoutes); // All auth routes start with /api
 app.use('/api', predictionRoutes); // All prediction routes start with /api
+app.use('/api', MachinesRoutes); // All machine routes start with /api
 
 
 
