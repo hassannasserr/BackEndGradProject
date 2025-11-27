@@ -91,6 +91,8 @@ router.post('/machines/:id/data', async (req, res) => {
                 process_temperature
             };
             
+            console.log('Calling prediction API with data:', predictionData);
+            
             const response = await axios.post(
                 'https://tasneem2.pythonanywhere.com/predict',
                 predictionData,
@@ -100,24 +102,33 @@ router.post('/machines/:id/data', async (req, res) => {
                 }
             );
             
-            console.log('Prediction API response:', response.data);
+            console.log('Prediction API response:', JSON.stringify(response.data, null, 2));
             
-            if (response.data && response.data.prediction !== undefined) {
-                const prediction = response.data.prediction;
+            if (response.data && response.data.failure_status !== undefined) {
+                const prediction = response.data.failure_status;
+                console.log('Extracted failure_status:', prediction);
+                console.log('Current MachineStatus before update:', machine.MachineStatus);
+                
                 // Set MachineStatus based on prediction value
                 if (prediction === 1 || prediction === '1') {
                     machine.MachineStatus = '1'; // Machine failure predicted
+                    console.log('Setting MachineStatus to "1" (failure predicted)');
                 } else if (prediction === 0 || prediction === '0') {
                     machine.MachineStatus = '0'; // Machine operating normally
+                    console.log('Setting MachineStatus to "0" (normal operation)');
                 } else {
                     // For any other prediction values, default to normal operation
                     machine.MachineStatus = '0';
                     console.warn('Unexpected prediction value:', prediction, 'Defaulting to status 0');
                 }
                 console.log(`Machine status updated to: ${machine.MachineStatus}`);
+            } else {
+                console.error('Unexpected API response structure:', response.data);
+                console.log('Available keys in response.data:', Object.keys(response.data || {}));
             }
         } catch (predictionError) {
             console.error('Prediction API error:', predictionError.message);
+            console.error('Full error:', predictionError);
             // Continue without prediction if API fails
         }
         await machine.save();
