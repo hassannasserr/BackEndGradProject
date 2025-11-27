@@ -227,5 +227,155 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ message: 'Server error during login.', error: err.message });
   }
 });
+// Middleware to verify JWT token
+const verifyToken = (req, res, next) => {
+  const token = req.header('Authorization')?.replace('Bearer ', '');
+  
+  if (!token) {
+    return res.status(401).json({ message: 'No token provided. Access denied.' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid token. Access denied.' });
+  }
+};
+
+// GET /api/personalinfo - Get authenticated user's personal information
+router.get('/personalinfo', verifyToken, async (req, res) => {
+  try {
+    // Get user ID from the verified token
+    const userId = req.user.userId;
+    
+    // Find user by ID and exclude sensitive information
+    const user = await User.findById(userId).select('-password -verificationToken -resetPasswordToken -verificationTokenExpires -resetPasswordExpires');
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    // Check if user is verified
+    if (!user.isVerified) {
+      return res.status(401).json({ message: 'Account not verified. Please verify your email first.' });
+    }
+
+    res.status(200).json({
+      message: 'Personal information retrieved successfully',
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
+        isVerified: user.isVerified,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      }
+    });
+
+  } catch (err) {
+    console.error('Personal info retrieval error:', err.message);
+    res.status(500).json({ 
+      message: 'Server error while retrieving personal information.', 
+      error: err.message 
+    });
+  }
+});
+
+// POST /api/change-password - Change user's password
+router.post('/change-password', verifyToken, async (req, res) => {
+  const { currentPassword, newPassword, confirmNewPassword } = req.body;
+
+  // Validate required fields
+  if (!currentPassword || !newPassword || !confirmNewPassword) {
+    return res.status(400).json({ 
+      message: 'Please provide current password, new password, and confirm new password.' 
+    });
+  }
+
+  // Check if new passwords match
+  if (newPassword !== confirmNewPassword) {
+    return res.status(400).json({ 
+      message: 'New password and confirm new password do not match.' 
+    });
+  }
+
+  // Validate new password length
+  if (newPassword.length < 6) {
+    return res.status(400).json({ 
+      message: 'New password must be at least 6 characters long.' 
+    });
+  }
+
+  // Check if new password is different from current password
+  if (currentPassword === newPassword) {
+    return res.status(400).json({ 
+      message: 'New password must be different from current password.' 
+    });
+  }
+
+  try {
+    // Get user ID from the verified token
+    const userId = req.user.userId;
+    
+    // Find user by ID
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    // Check if user is verified
+    if (!user.isVerified) {
+      return res.status(401).json({ message: 'Account not verified. Please verify your email first.' });
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await user.comparePassword(currentPassword);
+    
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({ message: 'Current password is incorrect.' });
+    }
+
+    // Update password (hashing is handled by the pre('save') hook in the User model)
+    user.password = newPassword;
+    user.updatedAt = Date.now();
+    await user.save();
+
+    res.status(200).json({ 
+      message: 'Password changed successfully.' 
+    });
+
+  } catch (err) {
+    console.error('Change password error:', err.message);
+    res.status(500).json({ 
+      message: 'Server error while changing password.', 
+      error: err.message 
+    });
+  }
+});
+
+// GET /api/logout - Logout user (token-based logout)
+router.get('/logout', verifyToken, async (req, res) => {
+  try {
+   
+    const userId = req.user.userId;
+    console.log(`User ${userId} logged out at ${new Date().toISOString()}`);
+    
+    res.status(200).json({
+      message: 'Logout successful. Please remove the token from your client.',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (err) {
+    console.error('Logout error:', err.message);
+    res.status(500).json({ 
+      message: 'Server error during logout.', 
+      error: err.message 
+    });
+  }
+});
 
 module.exports = router;
