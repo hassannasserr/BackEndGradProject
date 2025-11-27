@@ -100,8 +100,21 @@ router.post('/machines/:id/data', async (req, res) => {
                 }
             );
             
+            console.log('Prediction API response:', response.data);
+            
             if (response.data && response.data.prediction !== undefined) {
-                machine.MachineStatus = response.data.prediction.toString();
+                const prediction = response.data.prediction;
+                // Set MachineStatus based on prediction value
+                if (prediction === 1 || prediction === '1') {
+                    machine.MachineStatus = '1'; // Machine failure predicted
+                } else if (prediction === 0 || prediction === '0') {
+                    machine.MachineStatus = '0'; // Machine operating normally
+                } else {
+                    // For any other prediction values, default to normal operation
+                    machine.MachineStatus = '0';
+                    console.warn('Unexpected prediction value:', prediction, 'Defaulting to status 0');
+                }
+                console.log(`Machine status updated to: ${machine.MachineStatus}`);
             }
         } catch (predictionError) {
             console.error('Prediction API error:', predictionError.message);
