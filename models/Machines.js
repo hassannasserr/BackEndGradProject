@@ -19,7 +19,7 @@ const machineSchema = new mongoose.Schema({
     MachineStatus:{
         type: String,
         enum :['0','1','2'],
-        default: '0',
+        default: '1',
     },
     createdAt: {
         type: Date,

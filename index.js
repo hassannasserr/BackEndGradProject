@@ -3,7 +3,7 @@ const express = require('express');
 const app = express();
 const mongoose = require('mongoose');
 const cors = require('cors');
-const dbUri = process.env.MONGODB_URI ;
+const dbUri = process.env.MONGODB_URI;
 const bcrypt = require('bcrypt'); 
 const PORT = process.env.PORT || 3000;
 
@@ -11,11 +11,32 @@ const authRoutes = require('./routes/auth');
 const predictionRoutes = require('./routes/prediction');
 const MachinesRoutes = require('./routes/Machines');
 // Mongoose Connection
-mongoose.connect(dbUri)
+if (!dbUri) {
+  console.error('Missing `MONGODB_URI` in environment. Please set it in `.env`.');
+  process.exit(1);
+}
+
+// Helpful connection options to avoid common Windows/DNS issues
+const mongooseOptions = {
+  serverSelectionTimeoutMS: 8000,
+  directConnection: false,
+  // Force IPv4 to avoid IPv6 DNS edge cases on some networks
+  family: 4,
+};
+
+mongoose
+  .connect(dbUri, mongooseOptions)
   .then(() => console.log('MongoDB Connected Successfully!'))
-  .catch(err => {
-    console.error('MongoDB connection error:', err.message);
-    process.exit(1); 
+  .catch((err) => {
+    console.error('MongoDB connection error:', err?.message || err);
+    // Provide a hint if SRV query fails
+    if (String(err?.message).includes('querySrv') || String(err?.message).includes('_mongodb._tcp')) {
+      console.error(
+        'SRV lookup failed. Ensure your URI uses `mongodb+srv://` and that DNS/UDP is allowed. '
+        + 'Try forcing IPv4 (done), or use a non-SRV seed list URI from Atlas as a workaround.'
+      );
+    }
+    process.exit(1);
   });
 
 
