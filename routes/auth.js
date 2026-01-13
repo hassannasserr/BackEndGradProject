@@ -378,4 +378,20 @@ router.get('/logout', verifyToken, async (req, res) => {
   }
 });
 
+router.get('/alltechusers', async (req, res) => {
+  try {
+    const techUsers = await User.find({ role: 'technician' }).select('fullName email');
+    res.status(200).json({
+      message: 'Technician users retrieved successfully',
+      users: techUsers
+    });
+  } catch (err) {
+    console.error('Error fetching technician users:', err.message);
+    res.status(500).json({
+      message: 'Server error while retrieving technician users.',
+      error: err.message
+    });
+  }
+});
+
 module.exports = router;

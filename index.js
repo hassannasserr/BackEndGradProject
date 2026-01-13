@@ -10,6 +10,7 @@ const PORT = process.env.PORT || 3000;
 const authRoutes = require('./routes/auth'); 
 const predictionRoutes = require('./routes/prediction');
 const MachinesRoutes = require('./routes/Machines');
+const FailureRoutes = require('./routes/Failures');
 // Mongoose Connection
 if (!dbUri) {
   console.error('Missing `MONGODB_URI` in environment. Please set it in `.env`.');
@@ -49,9 +50,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api', authRoutes); // All auth routes start with /api
 app.use('/api', predictionRoutes); // All prediction routes start with /api
 app.use('/api', MachinesRoutes); // All machine routes start with /api
-
-
-
+app.use('/api', FailureRoutes); // All failure routes start with /api
 
 
 // Start Server
