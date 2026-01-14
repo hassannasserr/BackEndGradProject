@@ -42,6 +42,11 @@ const failureSchema=new mongoose.Schema({
         type:String,
         required:true,
     },
+    status:{
+        type:String,
+        enum :['Open','Fixed','Critical','Need Review','Need Help'],
+        default: 'Open',
+    },
     
     });
 module.exports=mongoose.model('Failure',failureSchema);
