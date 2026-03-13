@@ -17,6 +17,10 @@ router.post('/failures', async (req, res) => {
             return res.status(404).json({ message: "Machine not found" });
         }
 
+        machine.MachineStatus = '0';
+        machine.updatedAt = Date.now();
+        await machine.save();
+
         const failure = new Failures(req.body);
         await failure.save();
         res.status(201).json({ message: "Failure created successfully", failure });

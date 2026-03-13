@@ -2,95 +2,111 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 
-// Prediction endpoint
+const PREDICTION_API_BASE_URL = 'https://tasss11-lstm-model.hf.space/gradio_api/call/predict_engine';
+
+const parseSsePrediction = (sseText) => {
+    if (typeof sseText !== 'string') return null;
+
+    const dataMatches = [...sseText.matchAll(/^data:\s*(.+)$/gm)];
+    for (let index = dataMatches.length - 1; index >= 0; index -= 1) {
+        const candidate = dataMatches[index][1]?.trim();
+        if (!candidate) continue;
+        try {
+            return JSON.parse(candidate);
+        } catch (parseError) {
+            continue;
+        }
+    }
+
+    return null;
+};
+
+// Prediction endpoint (2-step Gradio flow)
 router.post('/predict', async (req, res) => {
     try {
-        // Log incoming request for debugging
         console.log('Prediction request received');
         console.log('Content-Type:', req.get('Content-Type'));
         console.log('Request body:', req.body);
-        // Extract sensor data from request body
-        const {
-            temperature,
-            pressure,
-            vibration,
-            humidity,
-            rotational_speed,
-            torque,
-            tool_wear,
-            air_temperature,
-            process_temperature
-        } = req.body;
 
-        // Validate required fields
-        const requiredFields = [
-            'temperature', 'pressure', 'vibration', 'humidity',
-            'rotational_speed', 'torque', 'tool_wear', 
-            'air_temperature', 'process_temperature'
-        ];
+        const { data } = req.body;
 
-        const missingFields = requiredFields.filter(field => 
-            req.body[field] === undefined || req.body[field] === null
-        );
-
-        if (missingFields.length > 0) {
+        if (!Array.isArray(data)) {
             return res.status(400).json({
-                error: 'Missing required fields',
-                missingFields: missingFields
+                error: 'Invalid payload',
+                message: 'Request body must include a data array'
             });
         }
 
-        // Validate that all values are numbers
-        const invalidFields = requiredFields.filter(field => 
-            typeof req.body[field] !== 'number'
-        );
-
-        if (invalidFields.length > 0) {
+        if (data.length !== 10) {
             return res.status(400).json({
-                error: 'Invalid data types. All sensor values must be numbers',
-                invalidFields: invalidFields
+                error: 'Invalid payload length',
+                message: 'data must contain exactly 10 numeric values'
             });
         }
 
-        // Prepare data for external API
-        const predictionData = {
-            temperature,
-            pressure,
-            vibration,
-            humidity,
-            rotational_speed,
-            torque,
-            tool_wear,
-            air_temperature,
-            process_temperature
-        };
+        const nonNumericIndexes = data
+            .map((value, index) => ({ value, index }))
+            .filter(item => typeof item.value !== 'number' || Number.isNaN(item.value))
+            .map(item => item.index);
 
-        console.log('Sending prediction request with data:', predictionData);
+        if (nonNumericIndexes.length > 0) {
+            return res.status(400).json({
+                error: 'Invalid data types',
+                message: 'All data values must be numbers',
+                invalidIndexes: nonNumericIndexes
+            });
+        }
 
-        // Call external prediction API
-        const response = await axios.post(
-            'https://tasneem2.pythonanywhere.com/predict',
-            predictionData,
+        console.log('Step 1: requesting event_id from prediction service');
+
+        const startResponse = await axios.post(
+            PREDICTION_API_BASE_URL,
+            { data },
             {
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                timeout: 10000 // 10 seconds timeout
+                timeout: 15000
             }
         );
 
-        console.log('Prediction response:', response.data);
+        const eventId = startResponse?.data?.event_id;
 
-        // Return the prediction result
-        res.json({
+        if (!eventId) {
+            return res.status(502).json({
+                error: 'Prediction service error',
+                message: 'No event_id returned from prediction service',
+                serviceResponse: startResponse.data
+            });
+        }
+
+        console.log(`Step 2: fetching prediction result for event_id=${eventId}`);
+
+        const resultResponse = await axios.get(
+            `${PREDICTION_API_BASE_URL}/${eventId}`,
+            {
+                headers: {
+                    Accept: 'text/event-stream'
+                },
+                responseType: 'text',
+                timeout: 30000
+            }
+        );
+
+        const rawResult = resultResponse.data;
+        const parsedPrediction = parseSsePrediction(rawResult);
+
+        return res.json({
             success: true,
-            prediction: response.data,
-            inputData: predictionData
+            event_id: eventId,
+            inputData: data,
+            prediction: parsedPrediction,
+            rawResponse: rawResult
         });
 
     } catch (error) {
         console.error('Prediction error:', error.message);
-        
+
         if (error.code === 'ECONNABORTED') {
             return res.status(408).json({
                 error: 'Request timeout',
@@ -99,7 +115,6 @@ router.post('/predict', async (req, res) => {
         }
 
         if (error.response) {
-            // The external API responded with an error
             return res.status(error.response.status).json({
                 error: 'Prediction service error',
                 message: error.response.data || 'External API error',
@@ -108,15 +123,13 @@ router.post('/predict', async (req, res) => {
         }
 
         if (error.request) {
-            // Network error
             return res.status(503).json({
                 error: 'Service unavailable',
                 message: 'Cannot connect to prediction service'
             });
         }
 
-        // Other errors
-        res.status(500).json({
+        return res.status(500).json({
             error: 'Internal server error',
             message: error.message
         });
