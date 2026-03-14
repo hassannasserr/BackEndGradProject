@@ -1,5 +1,6 @@
 const express = require('express');
 const axios = require('axios');
+const Machines = require('../models/Machines');
 const router = express.Router();
 
 const PREDICTION_API_BASE_URL = 'https://tasss11-lstm-model.hf.space/gradio_api/call/predict_engine';
@@ -21,6 +22,26 @@ const parseSsePrediction = (sseText) => {
     return null;
 };
 
+const extractPredictionMetrics = (predictionPayload) => {
+    const text = Array.isArray(predictionPayload)
+        ? String(predictionPayload[0] || '')
+        : String(predictionPayload || '');
+
+    const readNumber = (regex) => {
+        const match = text.match(regex);
+        return match ? Number.parseFloat(match[1]) : null;
+    };
+
+    const statusMatch = text.match(/Status:\s*([^\n\r]+)/i);
+
+    return {
+        remainingCycles: readNumber(/Remaining\s+Cycles:\s*([-+]?\d*\.?\d+)/i),
+        daysToFailure: readNumber(/Days\s+to\s+Failure:\s*([-+]?\d*\.?\d+)/i),
+        failureProbability: readNumber(/Failure\s+Probability:\s*([-+]?\d*\.?\d+)/i),
+        predictionStatus: statusMatch ? statusMatch[1].trim() : null
+    };
+};
+
 // Prediction endpoint (2-step Gradio flow)
 router.post('/predict', async (req, res) => {
     try {
@@ -28,7 +49,14 @@ router.post('/predict', async (req, res) => {
         console.log('Content-Type:', req.get('Content-Type'));
         console.log('Request body:', req.body);
 
-        const { data } = req.body;
+        const { machineId, data } = req.body;
+
+        if (!machineId) {
+            return res.status(400).json({
+                error: 'Invalid payload',
+                message: 'Request body must include machineId'
+            });
+        }
 
         if (!Array.isArray(data)) {
             return res.status(400).json({
@@ -95,12 +123,43 @@ router.post('/predict', async (req, res) => {
 
         const rawResult = resultResponse.data;
         const parsedPrediction = parseSsePrediction(rawResult);
+        const metrics = extractPredictionMetrics(parsedPrediction);
+
+        let machine;
+        if (String(machineId).match(/^[0-9a-fA-F]{24}$/)) {
+            machine = await Machines.findById(machineId);
+        }
+        if (!machine) {
+            machine = await Machines.findOne({ machineId: String(machineId) });
+        }
+
+        if (!machine) {
+            return res.status(404).json({
+                error: 'Machine not found',
+                message: 'No machine exists for the provided machineId',
+                event_id: eventId,
+                prediction: parsedPrediction,
+                rawResponse: rawResult
+            });
+        }
+
+        machine.remainingCycles = metrics.remainingCycles;
+        machine.daysToFailure = metrics.daysToFailure;
+        machine.failureProbability = metrics.failureProbability;
+        machine.predictionStatus = metrics.predictionStatus;
+        machine.updatedAt = Date.now();
+        await machine.save();
 
         return res.json({
             success: true,
             event_id: eventId,
+            machine: {
+                _id: machine._id,
+                machineId: machine.machineId
+            },
             inputData: data,
             prediction: parsedPrediction,
+            savedMetrics: metrics,
             rawResponse: rawResult
         });
 

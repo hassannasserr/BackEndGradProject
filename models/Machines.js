@@ -29,15 +29,18 @@ const machineSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
-    temperature: Number,
-    pressure: Number,
-    vibration: Number,
-    humidity: Number,
-    rotational_speed: Number,
-    torque: Number,
-    tool_wear: Number,
+    Total_Temperature: Number,
+    HPC_Pressure: Number,
+    Static_Pressure: Number,
+    Rotational_Speed: Number,
+    Exhaust_Temperature: Number,
+    Vibration_Equivalent: Number,
     air_temperature: Number,
-    process_temperature: Number
+    process_temperature: Number,
+    remainingCycles: Number,
+    daysToFailure: Number,
+    failureProbability: Number,
+    predictionStatus: String
 
 });
 
