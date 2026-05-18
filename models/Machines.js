@@ -29,14 +29,10 @@ const machineSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
-    Total_Temperature: Number,
-    HPC_Pressure: Number,
-    Static_Pressure: Number,
-    Rotational_Speed: Number,
-    Exhaust_Temperature: Number,
-    Vibration_Equivalent: Number,
-    air_temperature: Number,
-    process_temperature: Number,
+    temp_dht: Number,
+    temp_ds: Number,
+    vib_rms: Number,
+    light: Number,
     remainingCycles: Number,
     daysToFailure: Number,
     failureProbability: Number,
@@ -45,17 +41,6 @@ const machineSchema = new mongoose.Schema({
 });
 
 
-/**
- *"temperature":48.4,
-  "pressure":10,
-  "vibration":5.5,
-  "humidity":46.7,
-  "rotational_speed":1613,
-  "torque":33.2,
-  "tool_wear":16,
-  "air_temperature":24.4,
-  "process_temperature":34.2
- */
 
 
 module.exports = mongoose.model('Machine', machineSchema);

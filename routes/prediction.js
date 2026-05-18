@@ -3,7 +3,7 @@ const axios = require('axios');
 const Machines = require('../models/Machines');
 const router = express.Router();
 
-const PREDICTION_API_BASE_URL = 'https://tasss11-lstm-model.hf.space/gradio_api/call/predict_engine';
+const PREDICTION_API_BASE_URL = 'https://huggingface.co/spaces/tasss11/lstmmodelno';
 
 const parseSsePrediction = (sseText) => {
     if (typeof sseText !== 'string') return null;
@@ -42,88 +42,40 @@ const extractPredictionMetrics = (predictionPayload) => {
     };
 };
 
-// Prediction endpoint (2-step Gradio flow)
+// Prediction endpoint — call HuggingFace Space and save metrics
 router.post('/predict', async (req, res) => {
     try {
         console.log('Prediction request received');
-        console.log('Content-Type:', req.get('Content-Type'));
-        console.log('Request body:', req.body);
 
-        const { machineId, data } = req.body;
+        const { machineId, temp_dht, temp_ds, vib_rms, light } = req.body;
 
         if (!machineId) {
-            return res.status(400).json({
-                error: 'Invalid payload',
-                message: 'Request body must include machineId'
-            });
+            return res.status(400).json({ error: 'Invalid payload', message: 'Request body must include machineId' });
         }
 
-        if (!Array.isArray(data)) {
-            return res.status(400).json({
-                error: 'Invalid payload',
-                message: 'Request body must include a data array'
-            });
+        const inputs = { temp_dht, temp_ds, vib_rms, light };
+        const nonNumeric = Object.entries(inputs)
+            .filter(([_, v]) => typeof v !== 'number' || Number.isNaN(v))
+            .map(([k]) => k);
+
+        if (nonNumeric.length > 0) {
+            return res.status(400).json({ error: 'Invalid input types', message: 'All sensor inputs must be numbers', invalidFields: nonNumeric });
         }
 
-        if (data.length !== 10) {
-            return res.status(400).json({
-                error: 'Invalid payload length',
-                message: 'data must contain exactly 10 numeric values'
-            });
-        }
+        // Prepare payload for the Space. Many Gradio-based Spaces accept {data: [...]}
+        const payload = { data: [temp_dht, temp_ds, vib_rms, light] };
 
-        const nonNumericIndexes = data
-            .map((value, index) => ({ value, index }))
-            .filter(item => typeof item.value !== 'number' || Number.isNaN(item.value))
-            .map(item => item.index);
+        const apiUrl = `${PREDICTION_API_BASE_URL}/api/predict`;
 
-        if (nonNumericIndexes.length > 0) {
-            return res.status(400).json({
-                error: 'Invalid data types',
-                message: 'All data values must be numbers',
-                invalidIndexes: nonNumericIndexes
-            });
-        }
+        const response = await axios.post(apiUrl, payload, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 30000
+        });
 
-        console.log('Step 1: requesting event_id from prediction service');
+        // The Space may return {data: [...]} or a plain value — handle both.
+        const servicePayload = response?.data?.data ?? response?.data ?? null;
 
-        const startResponse = await axios.post(
-            PREDICTION_API_BASE_URL,
-            { data },
-            {
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                timeout: 15000
-            }
-        );
-
-        const eventId = startResponse?.data?.event_id;
-
-        if (!eventId) {
-            return res.status(502).json({
-                error: 'Prediction service error',
-                message: 'No event_id returned from prediction service',
-                serviceResponse: startResponse.data
-            });
-        }
-
-        console.log(`Step 2: fetching prediction result for event_id=${eventId}`);
-
-        const resultResponse = await axios.get(
-            `${PREDICTION_API_BASE_URL}/${eventId}`,
-            {
-                headers: {
-                    Accept: 'text/event-stream'
-                },
-                responseType: 'text',
-                timeout: 30000
-            }
-        );
-
-        const rawResult = resultResponse.data;
-        const parsedPrediction = parseSsePrediction(rawResult);
-        const metrics = extractPredictionMetrics(parsedPrediction);
+        const metrics = extractPredictionMetrics(servicePayload);
 
         let machine;
         if (String(machineId).match(/^[0-9a-fA-F]{24}$/)) {
@@ -134,13 +86,7 @@ router.post('/predict', async (req, res) => {
         }
 
         if (!machine) {
-            return res.status(404).json({
-                error: 'Machine not found',
-                message: 'No machine exists for the provided machineId',
-                event_id: eventId,
-                prediction: parsedPrediction,
-                rawResponse: rawResult
-            });
+            return res.status(404).json({ error: 'Machine not found', message: 'No machine exists for the provided machineId', prediction: servicePayload });
         }
 
         machine.remainingCycles = metrics.remainingCycles;
@@ -150,48 +96,24 @@ router.post('/predict', async (req, res) => {
         machine.updatedAt = Date.now();
         await machine.save();
 
-        return res.json({
-            success: true,
-            event_id: eventId,
-            machine: {
-                _id: machine._id,
-                machineId: machine.machineId
-            },
-            inputData: data,
-            prediction: parsedPrediction,
-            savedMetrics: metrics,
-            rawResponse: rawResult
-        });
+        return res.json({ success: true, machine: { _id: machine._id, machineId: machine.machineId }, input: inputs, prediction: servicePayload, savedMetrics: metrics });
 
     } catch (error) {
-        console.error('Prediction error:', error.message);
+        console.error('Prediction error:', error && error.message ? error.message : error);
 
         if (error.code === 'ECONNABORTED') {
-            return res.status(408).json({
-                error: 'Request timeout',
-                message: 'The prediction service took too long to respond'
-            });
+            return res.status(408).json({ error: 'Request timeout', message: 'The prediction service took too long to respond' });
         }
 
         if (error.response) {
-            return res.status(error.response.status).json({
-                error: 'Prediction service error',
-                message: error.response.data || 'External API error',
-                status: error.response.status
-            });
+            return res.status(error.response.status || 502).json({ error: 'Prediction service error', message: error.response.data || 'External API error', status: error.response.status });
         }
 
         if (error.request) {
-            return res.status(503).json({
-                error: 'Service unavailable',
-                message: 'Cannot connect to prediction service'
-            });
+            return res.status(503).json({ error: 'Service unavailable', message: 'Cannot connect to prediction service' });
         }
 
-        return res.status(500).json({
-            error: 'Internal server error',
-            message: error.message
-        });
+        return res.status(500).json({ error: 'Internal server error', message: error.message || String(error) });
     }
 });
 
